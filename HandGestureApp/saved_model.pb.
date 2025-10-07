@@ -1,0 +1,4 @@
+import tensorflow as tf
+
+model = tf.keras.models.load_model("../models/isl_model.h5")
+tf.saved_model.save(model, "../models/isl_saved_model")
