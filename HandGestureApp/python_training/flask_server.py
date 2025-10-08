@@ -7,9 +7,8 @@ import tensorflow as tf
 print("✅ Starting Flask server...")
 print("📦 Loading TFLite model...")
 
-interpreter = tf.lite.Interpreter(model_path="../models/isl_model.tflite")
+interpreter = tf.lite.Interpreter(model_path="/home/sunny/Desktop/jobProtal/java/handgesture-reader/models/isl_model.tflite")
 interpreter.allocate_tensors()
-
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(
     static_image_mode=False,       # ✅ Real-time tracking
