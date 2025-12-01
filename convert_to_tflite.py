@@ -1,14 +1,13 @@
 import tensorflow as tf
 
-print("📦 Loading .h5 model...")
-from keras.models import load_model
-model = load_model("../models/isl_model.h5")
-print("🔄 Converting to TFLite...")
-converter = tf.lite.TFLiteConverter.from_keras_model(model)
+print("📦 Converting SavedModel to TFLite...")
+
+converter = tf.lite.TFLiteConverter.from_saved_model("../models/isl_saved_model")
+converter.optimizations = [tf.lite.Optimize.DEFAULT]
 tflite_model = converter.convert()
 
-print("💾 Saving isl_model.tflite...")
 with open("../models/isl_model.tflite", "wb") as f:
+
     f.write(tflite_model)
 
-print("✅ Conversion complete.")
+print("✅ TFLite model saved as isl_model.tflite")
