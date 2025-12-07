@@ -1,24 +1,29 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import cv2
 import numpy as np
 import mediapipe as mp
 import tensorflow as tf
-import os
 
 print("✅ Starting Flask server...")
 print("📦 Loading TFLite model...")
 
+# Load TFLite model
 interpreter = tf.lite.Interpreter(model_path="isl_model.tflite")
 interpreter.allocate_tensors()
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
 
+# Initialize MediaPipe Hands
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(
-    static_image_mode=False,           # ✅ Enables tracking across frames
-    max_num_hands=1,                   # ✅ More stable for single hand
+    static_image_mode=False,
+    max_num_hands=1,
     min_detection_confidence=0.6,
     min_tracking_confidence=0.6
 )
 
+# Gesture labels (adjust to match your dataset)
 class_labels = [
     '1', '2', '3', '4', '5', '6', '7', '8', '9',
     'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
@@ -26,12 +31,18 @@ class_labels = [
     'U', 'V', 'W', 'X', 'Y', 'Z'
 ]
 
+CONFIDENCE_THRESHOLD = 0.07  
+
 app = Flask(__name__)
+CORS(app)
+
+def softmax(x):
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum()
 
 def detect_hands(img):
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     results = hands.process(img_rgb)
-
     print("🧪 Running hand detection...")
 
     if not results.multi_hand_landmarks:
@@ -39,13 +50,11 @@ def detect_hands(img):
         return [], []
 
     h, w, _ = img.shape
-    boxes = []
-    crops = []
+    boxes, crops = [], []
 
     for hand_landmarks in results.multi_hand_landmarks:
         x_coords = [lm.x * w for lm in hand_landmarks.landmark]
         y_coords = [lm.y * h for lm in hand_landmarks.landmark]
-
         x_min, x_max = int(min(x_coords)), int(max(x_coords))
         y_min, y_max = int(min(y_coords)), int(max(y_coords))
 
@@ -57,12 +66,11 @@ def detect_hands(img):
 
         box = [x_min, y_min, x_max, y_max]
         cropped = img[y_min:y_max, x_min:x_max]
-
         boxes.append(box)
         crops.append(cropped)
         print("📦 Detected box:", box)
 
-    return crops, boxes
+    return boxes, crops
 
 def preprocess(img):
     img = cv2.resize(img, (64, 64))
@@ -82,22 +90,25 @@ def predict():
         file_bytes = file.read()
         img_array = np.asarray(bytearray(file_bytes), dtype=np.uint8)
         img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-        cv2.imwrite("debug_input.jpg", img)
 
         if img is None:
             return jsonify({'error': 'Failed to decode image'}), 400
 
-        crops, boxes = detect_hands(img)
-        if not crops:
-            return jsonify({'gesture': '', 'box': [], 'confidence': []})
+        boxes, crops = detect_hands(img)
 
-        input_details = interpreter.get_input_details()
-        output_details = interpreter.get_output_details()
+        # 🚫 If no hand detected → return empty
+        if not crops:
+            return jsonify({
+                'gesture': '',
+                'confidence': 0,
+                'box': None,
+                'top_predictions': []
+            })
 
         best_label = ''
         best_box = []
-        best_conf = []
         best_score = -1
+        top_predictions = []
 
         for crop, box in zip(crops, boxes):
             if crop.size == 0:
@@ -109,26 +120,46 @@ def predict():
 
             interpreter.set_tensor(input_details[0]['index'], np.expand_dims(processed, axis=0).astype(np.float32))
             interpreter.invoke()
-            prediction = interpreter.get_tensor(output_details[0]['index'])
-            label = decode_prediction(prediction)
-            score = np.max(prediction)
+            raw_pred = interpreter.get_tensor(output_details[0]['index'])[0]
+            confidence_vector = softmax(raw_pred)
 
-            print("🔮 Prediction vector:", prediction)
-            print("✅ Predicted label:", label, "Confidence:", score)
+            label = decode_prediction(confidence_vector)
+            score = float(np.max(confidence_vector))
+
+            top_indices = np.argsort(confidence_vector)[::-1][:3]
+            top_predictions = [(class_labels[i], float(confidence_vector[i])) for i in top_indices]
 
             if score > best_score:
-                best_score = score
-                best_label = label
-                best_box = box
-                best_conf = prediction[0].tolist()
+               best_score = score
+               best_label = label
+               best_box = box
+               top_predictions = [(class_labels[i], float(confidence_vector[i])) for i in top_indices]
 
-        os.remove("debug_input.jpg")  # Optional cleanup
+               # Save high-confidence crop for dataset building
+               if best_score > 0.8:  # adjust threshold as needed
+                   cv2.imwrite(f"captures/{best_label}_{int(best_score*100)}.png", crop)
+                   print(f"💾 Saved crop: {best_label}_{int(best_score*100)}.png")
 
-        return jsonify({
+    
+
+        # ✅ Confidence threshold: only return if > 0.5
+        if best_score < CONFIDENCE_THRESHOLD:
+            return jsonify({
+                'gesture': '',
+                'confidence': 0,
+                'box': None,
+                'top_predictions': []
+            })
+
+        response = {
             'gesture': best_label,
+            'confidence': best_score,
             'box': best_box,
-            'confidence': best_conf
-        })
+            'top_predictions': top_predictions
+        }
+
+        print("📤 Final response:", response)
+        return jsonify(response)
 
     except Exception as e:
         print("❌ Error during prediction:", str(e))

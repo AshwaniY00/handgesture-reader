@@ -19,18 +19,16 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.PrintWriter;
-import java.util.Arrays;
 
 public class ISLInterpreter {
     static {
         System.load(System.getProperty("user.dir") + "/lib/libopencv_java4120.so");
-        new java.io.File("checkpoints").mkdirs(); // ✅ Ensure checkpoints folder exists
+        new java.io.File("checkpoints").mkdirs();
     }
 
     public static void main(String[] args) throws Exception {
         System.out.println("🔍 Scanning for available cameras...");
         int cameraIndex = -1;
-
         for (int i = 0; i < 5; i++) {
             VideoCapture testCam = new VideoCapture(i, Videoio.CAP_V4L2);
             if (testCam.isOpened()) {
@@ -49,15 +47,17 @@ public class ISLInterpreter {
         }
 
         VideoCapture camera = new VideoCapture(cameraIndex);
+        if (!camera.isOpened()) {
+            System.out.println("🚫 Failed to open camera index: " + cameraIndex);
+            return;
+        }
+
         System.out.println("🎥 Using camera index: " + cameraIndex);
         HighGui.namedWindow("ISL Interpreter", HighGui.WINDOW_NORMAL);
         HighGui.resizeWindow("ISL Interpreter", 800, 600);
 
         Mat frame = new Mat();
-        RequestConfig config = RequestConfig.custom()
-                .setConnectTimeout(2000)
-                .setSocketTimeout(2000)
-                .build();
+        RequestConfig config = RequestConfig.custom().setConnectTimeout(2000).setSocketTimeout(2000).build();
         CloseableHttpClient client = HttpClients.custom().setDefaultRequestConfig(config).build();
 
         String lastGesture = "";
@@ -65,17 +65,17 @@ public class ISLInterpreter {
         StringBuilder sentence = new StringBuilder();
         long lastSent = System.currentTimeMillis();
 
-        int cropX1 = -1, cropY1 = -1, cropX2 = -1, cropY2 = -1;
-
         while (true) {
             long startTime = System.currentTimeMillis();
-
             camera.read(frame);
-            if (frame.empty()) break;
+            if (frame.empty()) {
+                System.out.println("⚠️ Frame is empty — skipping.");
+                continue;
+            }
 
-            Mat roi = frame.clone(); // ✅ Send full frame
-
-            if (!roi.empty() && System.currentTimeMillis() - lastSent > 100) { // ⚡ Faster prediction loop
+            Mat roi = frame.clone();
+            // ⏱️ Send frame every 500ms
+            if (!roi.empty() && System.currentTimeMillis() - lastSent > 500) {
                 MatOfByte mob = new MatOfByte();
                 Imgcodecs.imencode(".png", roi, mob);
                 byte[] imageBytes = mob.toArray();
@@ -90,12 +90,40 @@ public class ISLInterpreter {
                     String json = EntityUtils.toString(response.getEntity());
                     JSONObject obj = new JSONObject(json);
 
+                    // 🔍 Print raw server response for debugging
+                    System.out.println("🔍 Full server response: " + json);
+
                     String gesture = obj.optString("gesture", "");
+                    double confidence = obj.optDouble("confidence", -1);
                     JSONArray box = obj.optJSONArray("box");
 
+                    System.out.println("🧾 Gesture: " + gesture);
+                    System.out.println("🧾 Confidence: " + confidence);
+                    System.out.println("🧾 Sentence so far: " + sentence.toString());
+
+                    // ✅ Only draw bounding box when server returns coordinates
+                    if (box != null && box.length() == 4) {
+                        int x1 = box.getInt(0), y1 = box.getInt(1), x2 = box.getInt(2), y2 = box.getInt(3);
+
+                        // Draw the box
+                        Imgproc.rectangle(frame, new Point(x1, y1), new Point(x2, y2), new Scalar(0, 255, 0), 2);
+
+                        // Show gesture only if confidence is high
+                        if (!gesture.isEmpty() && confidence > 0.07) {
+                            Imgproc.putText(frame, gesture + " (" + String.format("%.2f", confidence) + ")",
+                                    new Point(x1 + 10, Math.max(y1 - 10, 20)),
+                                    Imgproc.FONT_HERSHEY_SIMPLEX, 0.8, new Scalar(0, 255, 0), 2);
+                        } else {
+                            gesture = ""; // ignore low-confidence predictions
+                        }
+                    } else {
+                        gesture = ""; // no box returned → no detection
+                    }
+
+                    // ✅ Stable detection logic (10 frames)
                     if (gesture.equals(lastGesture)) {
                         stableCount++;
-                        if (stableCount == 10 && !gesture.isEmpty()) {
+                        if (stableCount >= 5 && !gesture.isEmpty()) {
                             sentence.append(gesture);
                             stableCount = 0;
                         }
@@ -104,21 +132,22 @@ public class ISLInterpreter {
                         stableCount = 0;
                     }
 
-                    if (box != null && box.length() == 4) {
-                        cropX1 = box.getInt(0);
-                        cropY1 = box.getInt(1);
-                        cropX2 = box.getInt(2);
-                        cropY2 = box.getInt(3);
-
-                        Imgproc.rectangle(frame, new Point(cropX1, cropY1), new Point(cropX2, cropY2), new Scalar(0, 255, 0), 2);
-                        Imgproc.putText(frame, gesture, new Point(cropX1 + 10, Math.max(cropY1 - 10, 20)),
-                                Imgproc.FONT_HERSHEY_SIMPLEX, 0.8, new Scalar(0, 255, 0), 2);
-                    } else {
-                        cropX1 = cropY1 = cropX2 = cropY2 = -1;
+                    // ✅ Display top predictions
+                    JSONArray top = obj.optJSONArray("top_predictions");
+                    if (top != null) {
+                        for (int i = 0; i < top.length(); i++) {
+                            JSONArray pair = top.getJSONArray(i);
+                            String label = pair.getString(0);
+                            double conf = pair.getDouble(1);
+                            Imgproc.putText(frame, label + ": " + String.format("%.2f", conf),
+                                    new Point(30, 120 + i * 30),
+                                    Imgproc.FONT_HERSHEY_SIMPLEX, 0.7, new Scalar(0, 200, 200), 2);
+                        }
                     }
 
                 } catch (Exception e) {
                     System.out.println("❌ Error sending image to server: " + e.getMessage());
+                    e.printStackTrace();
                     Imgproc.putText(frame, "Server error", new Point(30, 90),
                             Imgproc.FONT_HERSHEY_SIMPLEX, 1.0, new Scalar(0, 0, 255), 2);
                 }
@@ -129,21 +158,20 @@ public class ISLInterpreter {
             Imgproc.putText(frame, "Gesture: " + lastGesture, new Point(30, 30),
                     Imgproc.FONT_HERSHEY_SIMPLEX, 1.0, new Scalar(255, 0, 0), 2);
             Imgproc.putText(frame, "Sentence: " + sentence.toString(), new Point(30, 60),
-                    Imgproc.FONT_HERSHEY_SIMPLEX, 1.0, new Scalar(0, 255, 255), 2); // ✅ Live sentence display
+                    Imgproc.FONT_HERSHEY_SIMPLEX, 1.0, new Scalar(200, 200, 200), 2);
 
-            long endTime = System.currentTimeMillis();
-            double fps = 1000.0 / (endTime - startTime);
+            double fps = 1000.0 / (System.currentTimeMillis() - startTime);
             Imgproc.putText(frame, String.format("FPS: %.2f", fps), new Point(30, 90),
                     Imgproc.FONT_HERSHEY_SIMPLEX, 0.6, new Scalar(200, 200, 200), 1);
 
             HighGui.imshow("ISL Interpreter", frame);
-            int key = HighGui.waitKey(1);
-
+            int key = HighGui.waitKey(30);
             if (key == 27) break;
             if (key == 'r') sentence.setLength(0);
             if (key == 's') {
                 try (PrintWriter out = new PrintWriter("output.txt")) {
-                    out.println(sentence.toString());
+                    out.println("Sentence: " + sentence.toString());
+                    out.println("Last Gesture: " + lastGesture);
                     System.out.println("💾 Sentence saved to output.txt");
                     Thread.sleep(500);
                 } catch (Exception e) {
