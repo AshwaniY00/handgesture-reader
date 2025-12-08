@@ -1,5 +1,5 @@
 package com.obportal.handgesture;
-
+import org.opencv.core.Core;
 import org.opencv.core.*;
 import org.opencv.imgproc.Imgproc;
 import org.opencv.imgcodecs.Imgcodecs;
@@ -22,9 +22,12 @@ import java.io.PrintWriter;
 
 public class ISLInterpreter {
     static {
-        System.load(System.getProperty("user.dir") + "/lib/libopencv_java4120.so");
-        new java.io.File("checkpoints").mkdirs();
-    }
+    // Load the OpenCV library that matches your system installation
+    System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
+
+    // Ensure checkpoints directory exists
+    new java.io.File("checkpoints").mkdirs();
+}
 
     public static void main(String[] args) throws Exception {
         System.out.println("🔍 Scanning for available cameras...");
