@@ -3,5 +3,5 @@ flask-cors
 opencv-python
 numpy
 mediapipe
-tensorflow
-
+tensorflow-cpu
+gunicorn
