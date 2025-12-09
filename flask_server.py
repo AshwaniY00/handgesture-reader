@@ -128,6 +128,9 @@ def predict():
         for crop, box in zip(crops, boxes):
             if crop.size == 0:
                 continue
+            cv2.imwrite("captures/debug_crop.png", crop)
+            print("🖼 Saved debug crop for inspection")
+
 
             processed = preprocess(crop)
             if processed.shape != (64, 64, 3):
