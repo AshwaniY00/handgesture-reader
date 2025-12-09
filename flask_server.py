@@ -4,9 +4,13 @@ import cv2
 import numpy as np
 import mediapipe as mp
 import tensorflow as tf
+import os
 
 print("✅ Starting Flask server...")
 print("📦 Loading TFLite model...")
+
+# Ensure captures directory exists
+os.makedirs("captures", exist_ok=True)
 
 # Load TFLite model
 interpreter = tf.lite.Interpreter(model_path="isl_model.tflite")
@@ -25,16 +29,25 @@ hands = mp_hands.Hands(
 
 # Gesture labels (adjust to match your dataset)
 class_labels = [
-    '1', '2', '3', '4', '5', '6', '7', '8', '9',
-    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
-    'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
-    'U', 'V', 'W', 'X', 'Y', 'Z'
+    '1','2','3','4','5','6','7','8','9',
+    'A','B','C','D','E','F','G','H','I','J',
+    'K','L','M','N','O','P','Q','R','S','T',
+    'U','V','W','X','Y','Z'
 ]
 
-CONFIDENCE_THRESHOLD = 0.07  
+CONFIDENCE_THRESHOLD = 0.07
 
 app = Flask(__name__)
 CORS(app)
+
+# ----- Option 1: Homepage & health -----
+@app.route('/', methods=['GET'])
+def home():
+    return "Gesture Recognition API is running! Use POST /predict with form-data key 'image'."
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok"}), 200
 
 def softmax(x):
     e_x = np.exp(x - np.max(x))
@@ -80,6 +93,7 @@ def preprocess(img):
 def decode_prediction(pred):
     return class_labels[np.argmax(pred)]
 
+# ----- Option 2: Prediction endpoint -----
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
@@ -96,7 +110,6 @@ def predict():
 
         boxes, crops = detect_hands(img)
 
-        # 🚫 If no hand detected → return empty
         if not crops:
             return jsonify({
                 'gesture': '',
@@ -130,19 +143,15 @@ def predict():
             top_predictions = [(class_labels[i], float(confidence_vector[i])) for i in top_indices]
 
             if score > best_score:
-               best_score = score
-               best_label = label
-               best_box = box
-               top_predictions = [(class_labels[i], float(confidence_vector[i])) for i in top_indices]
+                best_score = score
+                best_label = label
+                best_box = box
+                top_predictions = [(class_labels[i], float(confidence_vector[i])) for i in top_indices]
 
-               # Save high-confidence crop for dataset building
-               if best_score > 0.8:  # adjust threshold as needed
-                   cv2.imwrite(f"captures/{best_label}_{int(best_score*100)}.png", crop)
-                   print(f"💾 Saved crop: {best_label}_{int(best_score*100)}.png")
+                if best_score > 0.8:
+                    cv2.imwrite(f"captures/{best_label}_{int(best_score*100)}.png", crop)
+                    print(f"💾 Saved crop: {best_label}_{int(best_score*100)}.png")
 
-    
-
-        # ✅ Confidence threshold: only return if > 0.5
         if best_score < CONFIDENCE_THRESHOLD:
             return jsonify({
                 'gesture': '',
@@ -166,4 +175,5 @@ def predict():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
+    # Local dev only; on Render, gunicorn starts the app
     app.run(port=5001)
