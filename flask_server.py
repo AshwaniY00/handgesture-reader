@@ -86,7 +86,7 @@ def detect_hands(img):
     return boxes, crops
 
 def preprocess(img):
-    img = cv2.resize(img, (64, 64))
+    img = cv2.resize(img, (320, 320))
     img = img.astype('float32') / 255.0
     return img
 
