@@ -86,9 +86,10 @@ def detect_hands(img):
     return boxes, crops
 
 def preprocess(img):
-    img = cv2.resize(img, (320, 320))
+    img = cv2.resize(img, (64, 64))
     img = img.astype('float32') / 255.0
     return img
+
 
 def decode_prediction(pred):
     return class_labels[np.argmax(pred)]
