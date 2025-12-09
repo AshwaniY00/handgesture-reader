@@ -13,7 +13,7 @@ print("📦 Loading TFLite model...")
 os.makedirs("captures", exist_ok=True)
 
 # Load TFLite model
-interpreter = tf.lite.Interpreter(model_path="isl_model.tflite")
+interpreter = tf.lite.Interpreter(model_path="isl_model_quant.tflite")
 interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
