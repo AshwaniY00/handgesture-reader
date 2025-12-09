@@ -96,6 +96,7 @@ def decode_prediction(pred):
 # ----- Option 2: Prediction endpoint -----
 @app.route('/predict', methods=['POST'])
 def predict():
+    print("✅ Received request at /predict")   # Debug print added here
     try:
         if 'image' not in request.files:
             return jsonify({'error': 'No image uploaded'}), 400
