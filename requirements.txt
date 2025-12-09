@@ -1,6 +1,6 @@
 flask
 flask-cors
-numpy==1.23.5
+numpy==1.23.5 --only-binary=:all:
 opencv-python
 mediapipe==0.10.9
 tensorflow==2.12.0
